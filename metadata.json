@@ -1,0 +1,5 @@
+{
+  "name": "Neomorphic Scoreboard",
+  "description": "A dark-themed neomorphic interface for tracking scores for two teams. Users can add participants to each team and input scores, which are then visualized in a real-time updating bar chart for each team's total score.",
+  "requestFramePermissions": []
+}
