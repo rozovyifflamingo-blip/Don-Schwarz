@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Courier Sim: Urban Rush</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --ui-bg: rgba(20, 20, 25, 0.9);
+            --accent: #ffaa00;
+            --text: #eeeeee;
+            --danger: #ff4444;
+            --success: #44ff44;
+        }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: var(--bg-color);
+            font-family: 'Courier New', monospace;
+            color: var(--text);
+            user-select: none;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .hud-panel {
+            background: var(--ui-bg);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            pointer-events: auto;
+            max-width: 300px;
+        }
+        h1, h2, h3 { margin: 0 0 10px 0; font-size: 16px; color: var(--accent); text-transform: uppercase; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 14px; }
+        .bar-container { width: 100%; height: 8px; background: #333; margin-top: 4px; border-radius: 4px; overflow: hidden; }
+        .bar-fill { height: 100%; transition: width 0.2s; }
+        .hp-fill { background: var(--danger); }
+        .energy-fill { background: var(--accent); }
+        .xp-fill { background: #4488ff; }
+        
+        #menu-screen, #upgrade-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 10;
+        }
+        .hidden { display: none !important; }
+        
+        button {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px;
+            text-transform: uppercase;
+            transition: transform 0.1s;
+        }
+        button:hover { transform: scale(1.05); filter: brightness(1.1); }
+        button:disabled { background: #555; cursor: not-allowed; transform: none; }
+        
+        .upgrade-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #2a2a2a;
+            padding: 10px;
+            margin: 5px 0;
+            width: 400px;
+            border: 1px solid #444;
+        }
+        .upgrade-info { flex: 1; }
+        .upgrade-cost { color: var(--accent); font-weight: bold; }
+        
+        #notification-area {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            padding: 8px 16px;
+            margin: 5px;
+            border-radius: 4px;
+            animation: fadeOut 3s forwards;
+            font-size: 14px;
+        }
+        @keyframes fadeOut {
+            0% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-20px); }
+        }
+        
+        .controls-hint {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            text-align: right;
+            font-size: 12px;
+            color: #888;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <div class="hud-panel">
+            <h2>Статус Курьера</h2>
+            <div class="stat-row"><span>Здоровье</span><span id="hp-val">100%</span></div>
+            <div class="bar-container"><div id="hp-bar" class="bar-fill hp-fill" style="width: 100%"></div></div>
+            
+            <div class="stat-row" style="margin-top: 10px;"><span>Энергия</span><span id="energy-val">100%</span></div>
+            <div class="bar-container"><div id="energy-bar" class="bar-fill energy-fill" style="width: 100%"></div></div>
+
+            <div class="stat-row" style="margin-top: 10px;"><span>Уровень</span><span id="level-val">1</span></div>
+            <div class="bar-container"><div id="xp-bar" class="bar-fill xp-fill" style="width: 0%"></div></div>
+            
+            <div class="stat-row" style="margin-top: 15px; font-size: 18px; color: var(--success);">
+                <span>Баланс:</span><span id="money-val">$0</span>
+            </div>
+            <div class="stat-row" style="font-size: 12px; color: #aaa;">
+                <span>Репутация:</span><span id="rep-val">Новичок</span>
+            </div>
+        </div>
+
+        <div class="hud-panel" style="align-self: flex-end;" id="order-panel">
+            <h2>Текущий заказ</h2>
+            <div id="order-info">Нет активных заказов</div>
+            <button id="btn-open-map" style="display:none; width: 100%; margin-top: 10px;">Показать маршрут</button>
+        </div>
+    </div>
+
+    <div class="controls-hint">
+        WASD / Стрелки - Движение<br>
+        SPACE - Тормоз / Действие<br>
+        E - Взять/Сдать заказ<br>
+        M - Магазин/Прокачка (когда нет заказа)
+    </div>
+
+    <div id="notification-area"></div>
+
+    <!-- Главное меню / Пауза -->
+    <div id="menu-screen">
+        <h1 style="font-size: 48px; color: var(--accent); margin-bottom: 20px;">COURIER SIM</h1>
+        <p style="max-width: 600px; text-align: center; margin-bottom: 30px; line-height: 1.5;">
+            Ты — городской курьер. Доставляй еду и посылки, зарабатывай деньги, прокачивай характеристики.<br>
+            Береги энергию и транспорт. Дождь усложняет доставку.
+        </p>
+        <button id="btn-start" style="font-size: 24px; padding: 15px 40px;">Начать смену</button>
+    </div>
+
+    <!-- Экран прокачки -->
+    <div id="upgrade-screen" class="hidden">
+        <h2 style="font-size: 32px;">Центр Развития</h2>
+        <div class="stat-row" style="font-size: 20px; margin-bottom: 20px;">Доступно средств: <span id="shop-money" style="color: var(--success)">$0</span></div>
+        
+        <div id="upgrades-list">
+            <!-- Генерируется JS -->
+        </div>
+
+        <button id="btn-close-shop" style="margin-top: 20px;">Вернуться в город</button>
+    </div>
+
+<script>
+/**
+ * КОНФИГУРАЦИЯ И СОСТОЯНИЕ ИГРЫ
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Настройки экрана
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Состояние игры
+const GameState = {
+    MENU: 0,
+    PLAYING: 1,
+    SHOP: 2,
+    GAMEOVER: 3
+};
+
+let currentState = GameState.MENU;
+let lastTime = 0;
+let camera = { x: 0, y: 0 };
+
+// Игрок и прогрессия
+const player = {
+    x: 0, y: 0,
+    angle: 0,
+    speed: 0,
+    maxSpeed: 0,
+    acceleration: 0,
+    friction: 0,
+    turnSpeed: 0,
+    
+    // Характеристики
+    hp: 100, maxHp: 100,
+    energy: 100, maxEnergy: 100,
+    money: 0,
+    xp: 0, level: 1, nextLevelXp: 100,
+    reputation: 0,
+    
+    // Навыки (уровни 1-10)
+    stats: {
+        stamina: 1,   // Влияет на макс скорость бега и реген энергии
+        driving: 1,   // Влияет на управление транспортом
+        strength: 1   // Влияет на переносимый вес (пока абстрактно)
+    },
+    
+    hasVehicle: false, // Есть ли скутер
+    vehicleType: 'none', // 'bike', 'scooter'
+    currentOrder: null,
+    inventory: null // { type: 'food', quality: 1.0 }
+};
+
+// Мир
+const worldSize = 4000;
+const tileSize = 100;
+const buildings = [];
+const roads = [];
+const orders = [];
+const particles = [];
+const weather = {
+    type: 'clear', // clear, rain
+    intensity: 0,
+    timer: 0
+};
+
+// Управление
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => {
+    keys[e.code] = false;
+    if (e.code === 'KeyM' && currentState === GameState.PLAYING && !player.currentOrder) {
+        openShop();
+    }
+    if (e.code === 'KeyE') handleInteraction();
+});
+
+/**
+ * СИСТЕМЫ ИГРЫ
+ */
+
+// Генерация города
+function initWorld() {
+    buildings.length = 0;
+    orders.length = 0;
+    
+    // Простая сетка зданий с дорогами
+    for (let x = -worldSize/2; x < worldSize/2; x += tileSize * 4) {
+        for (let y = -worldSize/2; y < worldSize/2; y += tileSize * 4) {
+            if (Math.random() > 0.2) {
+                buildings.push({
+                    x: x + tileSize,
+                    y: y + tileSize,
+                    w: tileSize * 2,
+                    h: tileSize * 2,
+                    type: Math.random() > 0.7 ? 'restaurant' : 'house'
+                });
+            }
+        }
+    }
+    
+    // Стартовая позиция
+    player.x = 0;
+    player.y = 0;
+    updatePlayerStats();
+}
+
+function updatePlayerStats() {
+    // Пересчет характеристик на основе уровня и навыков
+    const spdBonus = player.stats.stamina * 0.5;
+    const handBonus = player.stats.driving * 0.05;
+    
+    if (player.hasVehicle) {
+        player.maxSpeed = 12 + spdBonus + (player.vehicleType === 'scooter' ? 4 : 0);
+        player.acceleration = 0.2 + (handBonus * 0.05);
+        player.friction = 0.96;
+        player.turnSpeed = 0.06 + (handBonus * 0.01);
+    } else {
+        player.maxSpeed = 5 + spdBonus;
+        player.acceleration = 0.3;
+        player.friction = 0.85;
+        player.turnSpeed = 0.08;
+    }
+}
+
+// Система заказов
+function spawnOrder() {
+    if (player.currentOrder || orders.length > 3) return;
+    
+    // Найти ресторан
+    const restaurants = buildings.filter(b => b.type === 'restaurant');
+    if (restaurants.length === 0) return;
+    
+    const startBuilding = restaurants[Math.floor(Math.random() * restaurants.length)];
+    
+    // Найти клиента (дом)
+    const houses = buildings.filter(b => b.type === 'house');
+    const endBuilding = houses[Math.floor(Math.random() * houses.length)];
+    
+    const reward = Math.floor(50 + (player.reputation * 2) + (Math.random() * 20));
+    const xpReward = Math.floor(20 + (player.level * 5));
+    
+    const order = {
+        id: Date.now(),
+        start: { x: startBuilding.x + startBuilding.w/2, y: startBuilding.y + startBuilding.h/2, building: startBuilding },
+        end: { x: endBuilding.x + endBuilding.w/2, y: endBuilding.y + endBuilding.h/2, building: endBuilding },
+        reward: reward,
+        xp: xpReward,
+        status: 'available', // available, taken, delivered
+        timer: 300 // секунд до отмены
+    };
+    
+    orders.push(order);
+    showNotification(`Новый заказ доступен! ($${reward})`);
+}
+
+// Взаимодействие
+function handleInteraction() {
+    if (currentState !== GameState.PLAYING) return;
+    
+    // Проверка близости к зданию
+    const nearbyBuilding = buildings.find(b => {
+        const dx = player.x - (b.x + b.w/2);
+        const dy = player.y - (b.y + b.h/2);
+        return Math.sqrt(dx*dx + dy*dy) < 80;
+    });
+    
+    if (!nearbyBuilding) return;
+    
+    // Логика заказов
+    if (player.currentOrder) {
+        // Сдача заказа
+        if (player.currentOrder.status === 'taken' && nearbyBuilding === player.currentOrder.end.building) {
+            completeOrder();
+        }
+    } else {
+        // Взятие заказа
+        const availableOrder = orders.find(o => o.status === 'available' && o.start.building === nearbyBuilding);
+        if (availableOrder) {
+            takeOrder(availableOrder);
+        }
+    }
+}
+
+function takeOrder(order) {
+    player.currentOrder = order;
+    order.status = 'taken';
+    player.inventory = { quality: 1.0 };
+    showNotification(`Заказ взят! Везите аккуратно.`);
+    updateUI();
+}
+
+function completeOrder() {
+    const order = player.currentOrder;
+    const bonus = Math.floor(order.reward * player.inventory.quality);
+    
+    player.money += bonus;
+    player.xp += order.xp;
+    player.reputation += 10;
+    
+    showNotification(`Доставлено! +$${bonus} | +${order.xp} XP`);
+    
+    // Удалить заказ
+    const idx = orders.indexOf(order);
+    if (idx > -1) orders.splice(idx, 1);
+    
+    player.currentOrder = null;
+    player.inventory = null;
+    
+    checkLevelUp();
+    updateUI();
+}
+
+function checkLevelUp() {
+    if (player.xp >= player.nextLevelXp) {
+        player.level++;
+        player.xp -= player.nextLevelXp;
+        player.nextLevelXp = Math.floor(player.nextLevelXp * 1.2);
+        player.hp = player.maxHp;
+        player.energy = player.maxEnergy;
+        showNotification(`УРОВЕНЬ ПОВЫШЕН! ${player.level}`);
+        updateUI();
+    }
+}
+
+// Магазин / Прокачка
+const upgrades = [
+    { id: 'stamina', name: 'Выносливость', costBase: 100, desc: '+Скорость бега, +Реген энергии' },
+    { id: 'driving', name: 'Вождение', costBase: 150, desc: '+Управление транспортом, меньше заносов' },
+    { id: 'bike', name: 'Велосипед', costBase: 500, desc: 'Первый транспорт (быстрее бега)', type: 'vehicle' },
+    { id: 'scooter', name: 'Скутер', costBase: 1500, desc: 'Быстрый транспорт, требует навыка', type: 'vehicle' }
+];
+
+function openShop() {
+    currentState = GameState.SHOP;
+    document.getElementById('menu-screen').classList.add('hidden');
+    document.getElementById('upgrade-screen').classList.remove('hidden');
+    renderShop();
+}
+
+function closeShop() {
+    currentState = GameState.PLAYING;
+    document.getElementById('upgrade-screen').classList.add('hidden');
+    lastTime = performance.now(); // Сброс дельты времени
+    requestAnimationFrame(gameLoop);
+}
+
+function renderShop() {
+    const list = document.getElementById('upgrades-list');
+    document.getElementById('shop-money').innerText = `$${player.money}`;
+    list.innerHTML = '';
+    
+    upgrades.forEach(upg => {
+        let canBuy = false;
+        let cost = upg.costBase;
+        
+        if (upg.type === 'vehicle') {
+            if (upg.id === 'bike' && player.hasVehicle) canBuy = false;
+            if (upg.id === 'scooter' && player.vehicleType === 'scooter') canBuy = false;
+            // Упрощение: можно купить только если нет лучшего
+            if (upg.id === 'bike' && player.vehicleType === 'scooter') canBuy = false;
+        } else {
+            // Стоимость растет с уровнем
+            const level = player.stats[upg.id] || 0;
+            cost = Math.floor(upg.costBase * Math.pow(1.5, level));
+            canBuy = player.money >= cost && level < 10;
+        }
+        
+        const div = document.createElement('div');
+        div.className = 'upgrade-item';
+        div.innerHTML = `
+            <div class="upgrade-info">
+                <div style="font-weight:bold; color:#fff">${upg.name}</div>
+                <div style="font-size:12px; color:#aaa">${upg.desc}</div>
+            </div>
+            <div class="upgrade-cost">$${cost}</div>
+            <button ${canBuy ? '' : 'disabled'} onclick="buyUpgrade('${upg.id}')">Купить</button>
+        `;
+        list.appendChild(div);
+    });
+}
+
+window.buyUpgrade = function(id) {
+    const upg = upgrades.find(u => u.id === id);
+    let cost = upg.costBase;
+    
+    if (upg.type === 'vehicle') {
+        if (player.money >= cost) {
+            player.money -= cost;
+            player.hasVehicle = true;
+            player.vehicleType = id;
+            updatePlayerStats();
+            showNotification(`Транспорт куплен: ${upg.name}`);
+        }
+    } else {
+        const level = player.stats[id] || 0;
+        cost = Math.floor(upg.costBase * Math.pow(1.5, level));
+        if (player.money >= cost && level < 10) {
+            player.money -= cost;
+            player.stats[id] = level + 1;
+            updatePlayerStats();
+            showNotification(`${upg.name} улучшен до ур. ${level + 1}`);
+        }
+    }
+    renderShop();
+    updateUI();
+};
+
+document.getElementById('btn-start').addEventListener('click', () => {
+    document.getElementById('menu-screen').classList.add('hidden');
+    initWorld();
+    currentState = GameState.PLAYING;
+    lastTime = performance.now();
+    gameLoop(lastTime);
+});
+
+document.getElementById('btn-close-shop').addEventListener('click', closeShop);
+
+/**
+ * ИГРОВОЙ ЦИКЛ
+ */
+function gameLoop(timestamp) {
+    if (currentState !== GameState.PLAYING) return;
+    
+    const dt = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+    
+    update(dt);
+    draw();
+    
+    requestAnimationFrame(gameLoop);
+}
+
+function update(dt) {
+    // Погода
+    weather.timer -= dt;
+    if (weather.timer <= 0) {
+        weather.type = Math.random() > 0.7 ? 'rain' : 'clear';
+        weather.intensity = weather.type === 'rain' ? Math.random() : 0;
+        weather.timer = 30 + Math.random() * 60;
+        if (weather.type === 'rain') showNotification("Начался дождь! Дороги скользкие.");
+        else showNotification("Погода улучшилась.");
+    }
+    
+    // Генерация заказов
+    if (Math.random() < 0.005) spawnOrder();
+    
+    // Физика игрока
+    let moveSpeed = 0;
+    let rotate = 0;
+    
+    if (keys['KeyW'] || keys['ArrowUp']) moveSpeed = 1;
+    if (keys['KeyS'] || keys['ArrowDown']) moveSpeed = -0.5;
+    if (keys['KeyA'] || keys['ArrowLeft']) rotate = -1;
+    if (keys['KeyD'] || keys['ArrowRight']) rotate = 1;
+    
+    // Тормоз
+    if (keys['Space']) {
+        player.speed *= 0.9;
+    }
+    
+    // Применение физики
+    if (moveSpeed !== 0) {
+        player.speed += moveSpeed * player.acceleration;
+        player.angle += rotate * player.turnSpeed * (player.speed / player.maxSpeed);
+        
+        // Трата энергии при движении
+        if (!player.hasVehicle) {
+            player.energy -= 0.05 * dt;
+        }
+    } else {
+        player.speed *= player.friction;
+        // Реген энергии
+        if (player.energy < player.maxEnergy) player.energy += 0.1 * dt;
+    }
+    
+    // Ограничение скорости
+    let currentMax = player.maxSpeed;
+    if (weather.type === 'rain') currentMax *= 0.8; // Скользко
+    if (player.energy <= 0) currentMax *= 0.5; // Устал
+    
+    if (player.speed > currentMax) player.speed = currentMax;
+    if (player.speed < -currentMax/2) player.speed = -currentMax/2;
+    
+    // Движение
+    player.x += Math.cos(player.angle) * player.speed;
+    player.y += Math.sin(player.angle) * player.speed;
+    
+    // Коллизии со зданиями
+    buildings.forEach(b => {
+        // Простая AABB коллизия с отталкиванием
+        const closestX = Math.max(b.x, Math.min(player.x, b.x + b.w));
+        const closestY = Math.max(b.y, Math.min(player.y, b.y + b.h));
+        
+        const dx = player.x - closestX;
+        const dy = player.y - closestY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist < 20) { // Радиус игрока
+            const angle = Math.atan2(dy, dx);
+            const push = 20 - dist;
+            player.x += Math.cos(angle) * push;
+            player.y += Math.sin(angle) * push;
+            player.speed *= -0.5; // Удар
+            
+            if (player.hasVehicle && player.speed > 5) {
+                player.hp -= 5;
+                showNotification("Авария! -HP");
+                createParticles(player.x, player.y, '#ff0000', 5);
+            }
+        }
+    });
+    
+    // Границы мира
+    if (player.x < -worldSize/2) player.x = -worldSize/2;
+    if (player.x > worldSize/2) player.x = worldSize/2;
+    if (player.y < -worldSize/2) player.y = -worldSize/2;
+    if (player.y > worldSize/2) player.y = worldSize/2;
+    
+    // Камера следует за игроком
+    camera.x = player.x - canvas.width / 2;
+    camera.y = player.y - canvas.height / 2;
+    
+    // Обновление UI
+    updateUI();
+    
+    // Частицы
+    updateParticles(dt);
+    
+    // Game Over check
+    if (player.hp <= 0) {
+        alert("Вы получили слишком много травм. Смена окончена.");
+        location.reload();
+    }
+}
+
+function createParticles(x, y, color, count) {
+    for(let i=0; i<count; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 10,
+            vy: (Math.random() - 0.5) * 10,
+            life: 1.0,
+            color: color
+        });
+    }
+}
+
+function updateParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= dt * 2;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+/**
+ * ОТРИСОВКА
+ */
+function draw() {
+    // Очистка
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.translate(-camera.x, -camera.y);
+    
+    // Сетка земли
+    ctx.strokeStyle = '#2a2a2a';
+    ctx.lineWidth = 2;
+    const gridStartX = Math.floor(camera.x / tileSize) * tileSize;
+    const gridStartY = Math.floor(camera.y / tileSize) * tileSize;
+    
+    for (let x = gridStartX; x < camera.x + canvas.width; x += tileSize) {
+        ctx.beginPath(); ctx.moveTo(x, camera.y); ctx.lineTo(x, camera.y + canvas.height); ctx.stroke();
+    }
+    for (let y = gridStartY; y < camera.y + canvas.height; y += tileSize) {
+        ctx.beginPath(); ctx.moveTo(camera.x, y); ctx.lineTo(camera.x + canvas.width, y); ctx.stroke();
+    }
+    
+    // Здания
+    buildings.forEach(b => {
+        ctx.fillStyle = b.type === 'restaurant' ? '#4433aa' : '#334433';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        
+        // Крыша (эффект 2.5D)
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(b.x + 10, b.y + 10, b.w - 20, b.h - 20);
+        
+        // Маркер типа
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(b.type === 'restaurant' ? '🍔' : '🏠', b.x + b.w/2, b.y + b.h/2 + 7);
+    });
+    
+    // Заказы (маркеры)
+    orders.forEach(o => {
+        if (o.status === 'available') {
+            ctx.fillStyle = '#ffaa00';
+            ctx.beginPath();
+            ctx.arc(o.start.x, o.start.y, 15 + Math.sin(Date.now()/200)*5, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.font = '12px Arial';
+            ctx.fillText('$', o.start.x, o.start.y + 4);
+        } else if (o.status === 'taken' && o === player.currentOrder) {
+            // Маркер цели
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(o.end.x, o.end.y, 20, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText('🚩', o.end.x, o.end.y + 5);
+        }
+    });
+    
+    // Игрок
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    
+    // Тело
+    ctx.fillStyle = player.hasVehicle ? '#555' : '#ffaa00';
+    if (player.hasVehicle) {
+        // Рисуем скутер/байк
+        ctx.fillRect(-15, -8, 30, 16);
+        ctx.fillStyle = '#000'; // Колеса
+        ctx.fillRect(-10, -10, 8, 4);
+        ctx.fillRect(-10, 6, 8, 4);
+        ctx.fillRect(10, -10, 8, 4);
+        ctx.fillRect(10, 6, 8, 4);
+    } else {
+        // Пешком
+        ctx.beginPath();
+        ctx.arc(0, 0, 10, 0, Math.PI*2);
+        ctx.fill();
+    }
+    
+    // Груз
+    if (player.inventory) {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(5, -5, 10, 10);
+    }
+    
+    ctx.restore();
+    
+    // Частицы
+    particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 4, 4);
+        ctx.globalAlpha = 1.0;
+    });
+    
+    // Дождь
+    if (weather.type === 'rain') {
+        ctx.strokeStyle = 'rgba(100, 100, 255, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for(let i=0; i<100; i++) {
+            const rx = camera.x + Math.random() * canvas.width;
+            const ry = camera.y + Math.random() * canvas.height;
+            ctx.moveTo(rx, ry);
+            ctx.lineTo(rx - 2, ry + 10);
+        }
+        ctx.stroke();
+    }
+    
+    ctx.restore();
+}
+
+/**
+ * UI ФУНКЦИИ
+ */
+function updateUI() {
+    document.getElementById('hp-val').innerText = Math.floor(player.hp) + '%';
+    document.getElementById('hp-bar').style.width = player.hp + '%';
+    
+    document.getElementById('energy-val').innerText = Math.floor(player.energy) + '%';
+    document.getElementById('energy-bar').style.width = player.energy + '%';
+    
+    document.getElementById('level-val').innerText = player.level;
+    const xpPercent = (player.xp / player.nextLevelXp) * 100;
+    document.getElementById('xp-bar').style.width = xpPercent + '%';
+    
+    document.getElementById('money-val').innerText = '$' + player.money;
+    
+    const repTitles = ['Новичок', 'Любитель', 'Профи', 'Легенда'];
+    const repIndex = Math.min(Math.floor(player.reputation / 50), repTitles.length - 1);
+    document.getElementById('rep-val').innerText = repTitles[repIndex];
+    
+    // Панель заказа
+    const orderPanel = document.getElementById('order-info');
+    if (player.currentOrder) {
+        orderPanel.innerHTML = `
+            <div style="color: #aaa">Забрать: 🍔</div>
+            <div style="color: #fff; font-weight:bold">Доставить: 🏠</div>
+            <div style="color: var(--success)">Награда: $${player.currentOrder.reward}</div>
+            <div style="font-size:12px; color:${player.inventory.quality < 0.8 ? 'red' : '#aaa'}">
+                Состояние груза: ${Math.floor(player.inventory.quality * 100)}%
+            </div>
+        `;
+        // Ухудшение груза при быстрой езде
+        if (Math.abs(player.speed) > player.maxSpeed * 0.8) {
+            player.inventory.quality -= 0.001;
+        }
+        if (player.inventory.quality < 0) player.inventory.quality = 0;
+        
+    } else {
+        orderPanel.innerText = "Нет активных заказов. Ищите 🍔 на карте.";
+    }
+}
+
+function showNotification(text) {
+    const area = document.getElementById('notification-area');
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerText = text;
+    area.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+// Initial Render
+ctx.fillStyle = '#000';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+</script>
+</body>
+</html>
